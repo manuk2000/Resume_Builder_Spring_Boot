@@ -1,0 +1,44 @@
+name: Deploy to Minikube (K8s) using GitHub Actions
+
+on:
+  push:
+    branches:
+      - minikube-k8s
+
+jobs:
+  job1:
+    runs-on: ubuntu-latest
+    name: Build application docker image and deploy to Minikube
+    steps:
+      - uses: actions/checkout@v2
+      - name: Start Minikube
+        uses: medyagh/setup-minikube@master
+      - name: Docker login
+        env:
+          DOCKER_USER: shiru99
+          DOCKER_PASSWORD: ${{secrets.DOCKER_PASSWORD}}
+        run: |
+          docker login -u $DOCKER_USER -p $DOCKER_PASSWORD 
+      - name: Build docker image & Publish to DockerHub
+        run: |
+          export SHELL=/bin/bash
+          eval $(minikube -p minikube docker-env)
+          docker build . --file Dockerfile -t shiru99/resume-builder:latest -t shiru99/resume-builder:${{github.run_number}}
+          docker push shiru99/resume-builder:latest
+          docker push shiru99/resume-builder:${{github.run_number}}
+      - name: Minikube setup
+        run: |
+          minikube addons enable ingress
+          echo "$(minikube ip) resume-builder.dev" | sudo tee -a /etc/hosts
+          kubectl delete -A ValidatingWebhookConfiguration ingress-nginx-admission
+          kubectl get pods -A
+      - name: Deploy application to K8s cluster i.e. Minikube
+        run: |
+          kubectl apply -f k8s/db-manifest.yaml
+          kubectl apply -f k8s/app-manifest.yaml
+          sleep 120
+      - name: Test application
+        run: |
+          kubectl get all
+          kubectl get ingress
+          curl -Is http://resume-builder.dev/
